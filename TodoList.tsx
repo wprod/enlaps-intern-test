@@ -1,79 +1,135 @@
-// TodoList.tsx
-import React, { useState, useEffect } from 'react';
-import './TodoList.css';
+import React, { useState, useEffect, useCallback } from "react";
+import "./TodoList.css";
 
 interface Task {
   id: number;
   titre: string;
   isCompleted: boolean;
   userId?: number;
+  createdAt?: Date;
+  priority?: "low" | "medium" | "high";
 }
 
-type FilterType = 'tous' | 'active' | 'terminé';
+type FilterType = "tous" | "active" | "terminé" | "high-priority";
 
 interface TodoListProps {
   initialTasks?: Task[];
   maxTodos?: number;
+  enablePriority?: boolean;
 }
 
-const TodoList: React.FC<TodoListProps> = ({ initialTasks = [], maxTodos }) => {
+interface ApiResponse {
+  id: number;
+  title: string;
+  completed: boolean;
+  userId: number;
+}
+
+const TodoList: React.FC<TodoListProps> = ({
+                                             initialTasks = [],
+                                             maxTodos = 100,
+                                             enablePriority = false,
+                                           }) => {
   const [todos, setTodos] = useState<Task[]>(initialTasks);
-  const [inputValue, setInputValue] = useState<string>('');
-  const [filtre, setFiltre] = useState<FilterType>('tous');
+  const [inputValue, setInputValue] = useState<string>("");
+  const [filtre, setFiltre] = useState<FilterType>("tous");
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string>("");
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [selectedPriority, setSelectedPriority] = useState<
+      "low" | "medium" | "high"
+  >("medium");
 
-  // Récupération des todos depuis l'API
   useEffect(() => {
-    setIsLoading(true);
-    fetch('https://jsonplaceholder.typicode.com/todos?_limit=5')
-        .then(response => response.json())
-        .then((data: any) => {
-          // Erreur évidente : mapping incorrect des champs
-          const apiTasks = data.map((item: any) => ({
-            id: item.id,
-            titre: item.title,
-            isCompleted: item.completed,
-            userId: item.userId
-          }));
-          setTodos(apiTasks);
-          setIsLoading(false);
-        });
-  }, []);
+    const fetchTodos = async () => {
+      setIsLoading(true);
+      setError("");
 
-  // Ajout d'une nouvelle task
+      try {
+        const response = await fetch(
+            "https://jsonplaceholder.typicode.com/todos?_limit=8",
+        );
+        const data = await response.json();
+
+        const apiTasks: Task[] = data.map((item: any, index: number) => ({
+          id: item.id,
+          titre: item.title,
+          isCompleted: item.completed,
+          userId: item.userId,
+          createdAt: new Date(),
+          priority:
+              index % 3 === 0 ? "high" : index % 2 === 0 ? "medium" : "low",
+        }));
+
+        setTodos([...initialTasks, ...apiTasks]);
+      } catch (err) {
+        setError("Erreur lors du chargement");
+        console.error("Fetch error:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (initialTasks.length === 0) {
+      fetchTodos();
+    }
+  }, [initialTasks.length]);
+
   const ajouterTodo = (): void => {
-    if (inputValue.trim() !== '') {
+    if (inputValue.trim() !== "") {
+      if (todos.length >= maxTodos) {
+        alert(`Maximum ${maxTodos} todos autorisés !`);
+        return;
+      }
+
       const newTask: Task = {
         id: Date.now(),
-        titre: inputValue,
-        isCompleted: false
+        titre: inputValue.trim(),
+        isCompleted: false,
+        createdAt: new Date(),
+        priority: enablePriority ? selectedPriority : "medium",
       };
-      setTodos([...todos, newTask]);
-      setInputValue('');
+
+      setTodos((prevTodos) => [...prevTodos, newTask]);
+      setInputValue("");
+      setLastUpdated(new Date());
     }
   };
 
-  // Toggle du statut completed
   const toggleTask = (id: number): void => {
-    setTodos(todos.map(todo =>
-        todo.id === id ? { ...todo, isCompleted: !todo.isCompleted } : todo
-    ));
+    setTodos((prevTodos) =>
+        prevTodos.map((todo) =>
+            todo.id === id ? { ...todo, isCompleted: !todo.isCompleted } : todo,
+        ),
+    );
   };
 
-  // Suppression d'un todo - Erreur évidente : type incorrect
-  const supprimerTask = (id: string) => {
-    setTodos(todos.filter(todo => todo.id !== id));
+  const supprimerTask = (id: number | string) => {
+    setTodos((prevTodos) => prevTodos.filter((todo) => todo.id != id));
   };
 
-  // Filtrage des todos
-  const filteredTodos: Task[] = todos.filter(todo => {
-    if (filtre === 'terminé') return todo.isCompleted;
-    if (filtre === 'active') return !todo.isCompleted;
-    return true;
-  });
+  const filteredTodos: Task[] = todos
+      .filter((todo) => {
+        switch (filtre) {
+          case "terminé":
+            return todo.isCompleted;
+          case "active":
+            return !todo.isCompleted;
+          case "high-priority":
+            return todo.priority === "high" && !todo.isCompleted;
+          case "tous":
+          default:
+            return true;
+        }
+      })
+      .sort((a, b) => {
+        if (a.priority === "high" && b.priority !== "high") return -1;
+        if (b.priority === "high" && a.priority !== "high") return 1;
+        return 0;
+      });
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       ajouterTodo();
     }
   };
@@ -82,165 +138,405 @@ const TodoList: React.FC<TodoListProps> = ({ initialTasks = [], maxTodos }) => {
     setFiltre(nouveauFiltre as FilterType);
   };
 
-  const remainingTasks: number = todos.filter(todo => !todo.isCompleted).length;
+  const remainingTasks: number = todos.filter(
+      (todo) => !todo.isCompleted,
+  ).length;
+  const completedTasks = todos.length - remainingTasks;
 
   const handleTodoClick = (task: Task) => {
-    console.log('Task clicked:', task);
+    console.log("Task clicked:", task);
     toggleTask(task.id);
   };
 
-  // Erreur évidente : division par zéro possible
   const calculerProgress = (): string => {
-    const completed = todos.length - remainingTasks;
+    if (todos.length === 0) return "0%";
+    const completed = completedTasks;
     return `${Math.round((completed / todos.length) * 100)}%`;
   };
 
   const clearCompletedTodos = () => {
-    setTodos(todos.filter(todo => !todo.isCompleted));
+    setTodos((prevTodos) => prevTodos.filter((todo) => !todo.isCompleted));
   };
 
   const marquerToutCompleted = () => {
-    setTodos(todos.map(todo => ({ ...todo, isCompleted: true })));
+    setTodos((prevTodos) =>
+        prevTodos.map((todo) => ({ ...todo, isCompleted: true })),
+    );
   };
+
+  const getPriorityColor = (priority?: string): string => {
+    switch (priority) {
+      case "high":
+        return "#ff4444";
+      case "medium":
+        return "#ffaa00";
+      case "low":
+        return "#44ff44";
+      default:
+        return "#cccccc";
+    }
+  };
+
+  const renderPriorityBadge = (priority?: string) => {
+    if (!enablePriority || !priority) return null;
+    return (
+        <span
+            className="priority-badge"
+            style={{ backgroundColor: getPriorityColor(priority) }}
+        >
+        {priority}
+      </span>
+    );
+  };
+
+  const shouldShowEmptyState =
+      filteredTodos.length === 0 && !isLoading && todos.length > 0;
 
   return (
       <div className="todo-container">
-        <h1>Ma Todo List</h1>
+        <header className="todo-header">
+          <h1>Ma Todo List Avancée</h1>
+          <div className="header-stats">
+            <span>Total: {todos.length}</span>
+            <span>•</span>
+            <span>Restantes: {remainingTasks}</span>
+          </div>
+        </header>
 
-        {/* Progress bar */}
+        {error && (
+            <div
+                className="error-message"
+                style={{ color: "red", padding: "10px" }}
+            >
+              {error}
+              <button onClick={() => setError("")}>✕</button>
+            </div>
+        )}
+
         <div className="barre-progression">
           <div
               className="progress-fill"
-              style={{ width: calculerProgress() }}
+              style={{
+                width: calculerProgress(),
+                backgroundColor:
+                    completedTasks === todos.length ? "#4caf50" : "#2196f3",
+              }}
           ></div>
-          <span>Progression: {calculerProgress()}</span>
+          <span className="progress-text">Progression: {calculerProgress()}</span>
         </div>
 
-        {/* Formulaire d'ajout */}
-        <div className="add-todo">
-          <input
-              type="text"
-              value={inputValue}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
-              placeholder="Ajouter une tâche..."
-              onKeyPress={handleKeyPress}
-              disabled={isLoading}
-              maxLength={maxTodos}
-          />
-          <button onClick={ajouterTodo} disabled={isLoading || !inputValue.trim()}>
-            {isLoading ? 'Loading...' : 'Ajouter'}
-          </button>
+        <div className="add-todo-section">
+          <div className="add-todo">
+            <input
+                type="text"
+                value={inputValue}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setInputValue(e.target.value)
+                }
+                placeholder="Ajouter une nouvelle tâche..."
+                onKeyPress={handleKeyPress}
+                disabled={isLoading}
+                maxLength={150}
+                className={inputValue.length > 100 ? "warning" : ""}
+            />
+
+            {enablePriority && (
+                <select
+                    value={selectedPriority}
+                    onChange={(e) => setSelectedPriority(e.target.value as any)}
+                    disabled={isLoading}
+                >
+                  <option value="low">Basse</option>
+                  <option value="medium">Moyenne</option>
+                  <option value="high">Haute</option>
+                </select>
+            )}
+
+            <button
+                onClick={ajouterTodo}
+                disabled={
+                    isLoading || !inputValue.trim() || todos.length >= maxTodos
+                }
+                className="add-button"
+            >
+              {isLoading ? "⏳" : "➕"} Ajouter
+            </button>
+          </div>
+
+          <div className="limit-indicator">
+            {todos.length}/{maxTodos} todos
+            {todos.length > maxTodos * 0.8 && (
+                <span className="warning"> ⚠️ Limite bientôt atteinte</span>
+            )}
+          </div>
         </div>
 
-        {/* Filtres */}
         <div className="filters">
           <button
-              className={filtre === 'tous' ? 'active' : ''}
-              onClick={() => changerFiltre('tous')}
+              className={filtre === "tous" ? "active" : ""}
+              onClick={() => changerFiltre("tous")}
           >
-            Toutes ({todos.length})
+            🗂️ Toutes ({todos.length})
           </button>
           <button
-              className={filtre === 'active' ? 'active' : ''}
-              onClick={() => changerFiltre('active')}
+              className={filtre === "active" ? "active" : ""}
+              onClick={() => changerFiltre("active")}
           >
-            Actives ({remainingTasks})
+            ⚡ Actives ({remainingTasks})
           </button>
           <button
-              className={filtre === 'terminé' ? 'active' : ''}
-              onClick={() => changerFiltre('terminé')}
+              className={filtre === "terminé" ? "active" : ""}
+              onClick={() => changerFiltre("terminé")}
           >
-            Terminées ({todos.length - remainingTasks})
+            ✅ Terminées ({completedTasks})
           </button>
+          {enablePriority && (
+              <button
+                  className={filtre === "high-priority" ? "active" : ""}
+                  onClick={() => changerFiltre("high-priority")}
+              >
+                🔥 Priorité Haute (
+                {
+                  todos.filter((t) => t.priority === "high" && !t.isCompleted)
+                      .length
+                }
+                )
+              </button>
+          )}
         </div>
 
-        {/* Message d'état */}
-        {isLoading && <div className="loading">Chargement des tasks...</div>}
+        {isLoading && (
+            <div className="loading-container">
+              <div className="spinner"></div>
+              <span>Chargement des tâches...</span>
+            </div>
+        )}
 
-        {/* Liste des todos */}
         <ul className="todo-list">
-          {filteredTodos.map(todo => (
-              <li key={todo.id} className={todo.isCompleted ? 'completed' : ''}>
-                <input
-                    type="checkbox"
-                    checked={todo.isCompleted}
-                    onChange={() => toggleTask(todo.id)}
-                />
-                <span
-                    onClick={() => handleTodoClick(todo)}
-                    style={{
-                      textDecoration: todo.isCompleted ? 'line-through' : 'none',
-                      cursor: 'pointer'
-                    }}
-                >
-              {todo.titre}
-            </span>
-                <button
-                    onClick={() => supprimerTask(todo.id)}
-                    className="delete-btn"
-                >
-                  ❌
-                </button>
+          {filteredTodos.map((todo, index) => (
+              <li
+                  key={`${todo.id}-${index}`}
+                  className={`todo-item ${todo.isCompleted ? "completed" : ""} priority-${todo.priority}`}
+                  style={{
+                    borderLeft: `4px solid ${getPriorityColor(todo.priority)}`,
+                    opacity: todo.isCompleted ? 0.7 : 1,
+                  }}
+              >
+                <div className="todo-content">
+                  <input
+                      type="checkbox"
+                      checked={todo.isCompleted}
+                      onChange={() => toggleTask(todo.id)}
+                      className="todo-checkbox"
+                  />
+
+                  <span
+                      onClick={() => handleTodoClick(todo)}
+                      className="todo-text"
+                      style={{
+                        textDecoration: todo.isCompleted ? "line-through" : "none",
+                        cursor: "pointer",
+                        color: todo.isCompleted ? "#999" : "#333",
+                      }}
+                      title={`Créé: ${todo.createdAt?.toLocaleDateString()}`}
+                  >
+                {todo.titre}
+              </span>
+
+                  {renderPriorityBadge(todo.priority)}
+
+                  {todo.userId && (
+                      <span className="user-badge">👤 User {todo.userId}</span>
+                  )}
+                </div>
+
+                <div className="todo-actions">
+                  <button
+                      onClick={() => supprimerTask(todo.id)}
+                      className="delete-btn"
+                      title="Supprimer la tâche"
+                  >
+                    🗑️
+                  </button>
+                </div>
               </li>
           ))}
         </ul>
 
-        {/* Message si aucune task */}
-        {filteredTodos.length === 0 && !isLoading && (
+        {shouldShowEmptyState && (
             <div className="empty-state">
-              {filtre === 'tous' ? 'Aucune task pour le moment' :
-                  filtre === 'active' ? 'Aucune task active' :
-                      'Aucune task terminée'}
+              <div className="empty-icon">📋</div>
+              <div className="empty-message">
+                {filtre === "tous"
+                    ? "Aucune tâche pour le moment"
+                    : filtre === "active"
+                        ? "Aucune tâche active ! 🎉"
+                        : filtre === "terminé"
+                            ? "Aucune tâche terminée encore"
+                            : "Aucune tâche haute priorité active"}
+              </div>
+              {filtre !== "tous" && (
+                  <button
+                      onClick={() => changerFiltre("tous")}
+                      className="view-all-btn"
+                  >
+                    Voir toutes les tâches
+                  </button>
+              )}
             </div>
         )}
 
-        {/* Compteur et actions */}
+        {todos.length === 0 && !isLoading && !error && (
+            <div className="welcome-state">
+              <h3>🌟 Bienvenue !</h3>
+              <p>Commencez par ajouter votre première tâche ci-dessus.</p>
+            </div>
+        )}
+
         <div className="todo-footer">
           <div className="todo-count">
-            {remainingTasks} task(s) restante(s)
+            <strong>{remainingTasks}</strong> tâche
+            {remainingTasks !== 1 ? "s" : ""} restante
+            {remainingTasks !== 1 ? "s" : ""}
+            {enablePriority && (
+                <span className="priority-count">
+              •{" "}
+                  {
+                    todos.filter((t) => t.priority === "high" && !t.isCompleted)
+                        .length
+                  }{" "}
+                  haute priorité
+            </span>
+            )}
           </div>
-          <button
-              onClick={clearCompletedTodos}
-              disabled={todos.length === remainingTasks}
-          >
-            Clear completed
-          </button>
-          <button
-              onClick={marquerToutCompleted}
-              disabled={remainingTasks === 0}
-          >
-            Marquer tout comme terminé
-          </button>
+
+          <div className="footer-actions">
+            <button
+                onClick={clearCompletedTodos}
+                disabled={completedTasks === 0}
+                className="clear-completed-btn"
+                title="Supprimer toutes les tâches terminées"
+            >
+              🧹 Nettoyer ({completedTasks})
+            </button>
+
+            <button
+                onClick={marquerToutCompleted}
+                disabled={remainingTasks === 0}
+                className="mark-all-btn"
+                title="Marquer toutes comme terminées"
+            >
+              ✅ Tout terminer
+            </button>
+          </div>
         </div>
 
-        {/* Statistiques */}
-        <div className="stats">
-          <p>Total: {todos.length} todos</p>
-          <p>Completed: {todos.length - remainingTasks}</p>
-          <p>Progress: {calculerProgress()}</p>
-        </div>
+        <details className="stats-section">
+          <summary>📊 Statistiques détaillées</summary>
+          <div className="stats-grid">
+            <div className="stat-item">
+              <span className="stat-label">Total:</span>
+              <span className="stat-value">{todos.length}</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-label">Terminées:</span>
+              <span className="stat-value">{completedTasks}</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-label">Progression:</span>
+              <span className="stat-value">{calculerProgress()}</span>
+            </div>
+            {enablePriority && (
+                <>
+                  <div className="stat-item">
+                    <span className="stat-label">Haute priorité:</span>
+                    <span className="stat-value">
+                  {todos.filter((t) => t.priority === "high").length}
+                </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Moyenne priorité:</span>
+                    <span className="stat-value">
+                  {todos.filter((t) => t.priority === "medium").length}
+                </span>
+                  </div>
+                  <div className="stat-item">
+                    <span className="stat-label">Basse priorité:</span>
+                    <span className="stat-value">
+                  {todos.filter((t) => t.priority === "low").length}
+                </span>
+                  </div>
+                </>
+            )}
+          </div>
+        </details>
 
-        {/* Debug info (à supprimer en production) */}
-        <div className="debug-info" style={{ marginTop: '20px', fontSize: '12px', color: '#666' }}>
-          <p>Debug: {todos.length} todos au total</p>
-          <p>Current filter: {filtre}</p>
-          <p>Loading state: {isLoading ? 'true' : 'false'}</p>
-          <p>Progression: {calculerProgress()}</p>
-        </div>
+        {process.env.NODE_ENV === "development" && (
+            <details className="debug-info">
+              <summary>🐛 Debug Info</summary>
+              <pre
+                  style={{
+                    fontSize: "11px",
+                    color: "#666",
+                    background: "#f5f5f5",
+                    padding: "10px",
+                  }}
+              >
+            {JSON.stringify(
+                {
+                  totalTodos: todos.length,
+                  currentFilter: filtre,
+                  loadingState: isLoading,
+                  errorState: error,
+                  remainingTasks,
+                  completedTasks,
+                  progress: calculerProgress(),
+                  enablePriority,
+                  selectedPriority,
+                  lastUpdated: lastUpdated.toISOString(),
+                },
+                null,
+                2,
+            )}
+          </pre>
+            </details>
+        )}
       </div>
   );
 };
 
-// Composant d'exemple d'utilisation
 const App: React.FC = () => {
   const initialTasks: Task[] = [
-    { id: 1, titre: 'Première task', isCompleted: false },
-    { id: 2, titre: 'Deuxième todo', isCompleted: true }
+    {
+      id: 1,
+      titre: "Réviser pour l'examen de React",
+      isCompleted: false,
+      priority: "high",
+      createdAt: new Date(),
+    },
+    {
+      id: 2,
+      titre: "Faire les courses",
+      isCompleted: true,
+      priority: "medium",
+      createdAt: new Date(),
+    },
+    {
+      id: 3,
+      titre: "Appeler le médecin",
+      isCompleted: false,
+      priority: "high",
+      createdAt: new Date(),
+    },
   ];
 
   return (
-      <div>
-        <TodoList initialTasks={initialTasks} maxTodos={50} />
+      <div className="app">
+        <TodoList
+            initialTasks={initialTasks}
+            maxTodos={50}
+            enablePriority={true}
+        />
       </div>
   );
 };
